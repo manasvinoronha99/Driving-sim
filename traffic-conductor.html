@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Conductor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #video {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid white;
+            border-radius: 8px;
+            transform: scaleX(-1);
+            z-index: 100;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 500px;
+            z-index: 200;
+        }
+
+        #instructions h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        #instructions p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        #startButton {
+            background: #FF6B6B;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+
+        #startButton:hover {
+            background: #ff5252;
+        }
+
+        #stats {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        .stat-item {
+            margin-bottom: 10px;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 32px;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 100;
+            text-align: center;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+
+    <div id="instructions">
+        <h2>🚦 Traffic Conductor</h2>
+        <p>Use your <strong>head movements</strong> to control traffic lights at the intersection.</p>
+        <p><strong>Tilt left/right:</strong> Switch horizontal/vertical lanes</p>
+        <p><strong>Tilt up/down:</strong> Control pedestrian crosswalks</p>
+        <p>Prevent collisions and keep traffic flowing smoothly. Watch out for emergency vehicles - they must be prioritized!</p>
+        <button id="startButton">Start Conducting</button>
+    </div>
+
+    <div id="stats">
+        <div class="stat-item">Flow Score: <span id="flowScore">0</span></div>
+        <div class="stat-item">Vehicles Passed: <span id="vehiclesPassed">0</span></div>
+        <div class="stat-item">Near Misses: <span id="nearMisses">0</span></div>
+        <div class="stat-item">Time: <span id="timeDisplay">0:00</span></div>
+        <div class="stat-item">Rush Hour: <span id="rushHour">Normal</span></div>
+    </div>
+
+    <div id="controls">
+        <div>Green Light: <span id="activeLight">Horizontal</span></div>
+        <div>Crosswalk: <span id="crosswalkStatus">Closed</span></div>
+    </div>
+
+    <div id="message"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/facemesh"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const instructions = document.getElementById('instructions');
+        const startButton = document.getElementById('startButton');
+        const messageDiv = document.getElementById('message');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let model;
+        let gameStarted = false;
+        let vehicles = [];
+        let pedestrians = [];
+        let flowScore = 0;
+        let vehiclesPassed = 0;
+        let nearMisses = 0;
+        let gameTime = 0;
+
+        // Traffic light state
+        let horizontalGreen = true; // true = horizontal green, false = vertical green
+        let crosswalkOpen = false;
+
+        // Head tracking
+        let headTiltX = 0; // -1 = left, 1 = right
+        let headTiltY = 0; // -1 = up, 1 = down
+        let lastLightSwitch = Date.now();
+        let lastCrosswalkToggle = Date.now();
+
+        const intersectionX = canvas.width / 2;
+        const intersectionY = canvas.height / 2;
+        const roadWidth = 120;
+
+        class Vehicle {
+            constructor(direction, type = 'car') {
+                this.direction = direction; // 'north', 'south', 'east', 'west'
+                this.type = type; // 'car', 'emergency', 'bus', 'truck'
+                this.speed = type === 'bus' ? 1.5 : type === 'truck' ? 1.8 : 2.5;
+                this.speed = type === 'emergency' ? 3.5 : this.speed;
+                this.stopped = false;
+                this.width = type === 'truck' ? 50 : 40;
+                this.height = type === 'bus' ? 60 : type === 'truck' ? 50 : 35;
+
+                // Set starting position based on direction
+                if (direction === 'north') {
+                    this.x = intersectionX - roadWidth/4;
+                    this.y = canvas.height + 100;
+                } else if (direction === 'south') {
+                    this.x = intersectionX + roadWidth/4;
+                    this.y = -100;
+                } else if (direction === 'east') {
+                    this.x = -100;
+                    this.y = intersectionY - roadWidth/4;
+                } else if (direction === 'west') {
+                    this.x = canvas.width + 100;
+                    this.y = intersectionY + roadWidth/4;
+                }
+
+                this.color = this.getColor();
+            }
+
+            getColor() {
+                if (this.type === 'emergency') return '#FF0000';
+                if (this.type === 'bus') return '#FFD700';
+                if (this.type === 'truck') return '#8B4513';
+                const colors = ['#4A90E2', '#E85555', '#50C878', '#9B59B6'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            update() {
+                const stopDistance = 180;
+                const intersectionDistance = this.getDistanceToIntersection();
+
+                // Check if should stop at light
+                const shouldStop = this.shouldStopAtLight();
+
+                if (shouldStop && intersectionDistance < stopDistance && intersectionDistance > 50) {
+                    this.stopped = true;
+                } else {
+                    this.stopped = false;
+                }
+
+                // Move vehicle
+                if (!this.stopped) {
+                    if (this.direction === 'north') this.y -= this.speed;
+                    else if (this.direction === 'south') this.y += this.speed;
+                    else if (this.direction === 'east') this.x += this.speed;
+                    else if (this.direction === 'west') this.x -= this.speed;
+                }
+            }
+
+            shouldStopAtLight() {
+                if (this.type === 'emergency') return false; // Emergency vehicles don't stop
+
+                if (this.direction === 'north' || this.direction === 'south') {
+                    return !horizontalGreen;
+                } else {
+                    return horizontalGreen;
+                }
+            }
+
+            getDistanceToIntersection() {
+                if (this.direction === 'north') return this.y - intersectionY;
+                if (this.direction === 'south') return intersectionY - this.y;
+                if (this.direction === 'east') return intersectionX - this.x;
+                if (this.direction === 'west') return this.x - intersectionX;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                if (this.direction === 'south' || this.direction === 'north') {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
+
+                    // Windshield
+                    ctx.fillStyle = 'rgba(100, 150, 200, 0.5)';
+                    ctx.fillRect(-this.width/2 + 5, -this.height/2 + 5, this.width - 10, this.height/3);
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(-this.height/2, -this.width/2, this.height, this.width);
+
+                    // Windshield
+                    ctx.fillStyle = 'rgba(100, 150, 200, 0.5)';
+                    ctx.fillRect(-this.height/2 + 5, -this.width/2 + 5, this.height/3, this.width - 10);
+                }
+
+                // Emergency lights
+                if (this.type === 'emergency') {
+                    const flash = Math.floor(Date.now() / 200) % 2;
+                    ctx.fillStyle = flash ? '#FF0000' : '#0000FF';
+                    ctx.fillRect(-10, -this.height/2 - 5, 8, 4);
+                    ctx.fillRect(2, -this.height/2 - 5, 8, 4);
+                }
+
+                ctx.restore();
+            }
+
+            isOffScreen() {
+                return this.x < -200 || this.x > canvas.width + 200 ||
+                       this.y < -200 || this.y > canvas.height + 200;
+            }
+        }
+
+        class Pedestrian {
+            constructor(side) {
+                this.side = side; // 'top', 'bottom', 'left', 'right'
+                this.waiting = true;
+                this.progress = 0;
+
+                if (side === 'top') {
+                    this.startX = intersectionX - roadWidth - 30;
+                    this.startY = intersectionY - roadWidth - 30;
+                    this.endX = intersectionX + roadWidth + 30;
+                    this.endY = intersectionY - roadWidth - 30;
+                } else if (side === 'bottom') {
+                    this.startX = intersectionX + roadWidth + 30;
+                    this.startY = intersectionY + roadWidth + 30;
+                    this.endX = intersectionX - roadWidth - 30;
+                    this.endY = intersectionY + roadWidth + 30;
+                }
+
+                this.x = this.startX;
+                this.y = this.startY;
+            }
+
+            update() {
+                if (crosswalkOpen && this.waiting) {
+                    this.waiting = false;
+                }
+
+                if (!this.waiting) {
+                    this.progress += 0.015;
+                    this.x = this.startX + (this.endX - this.startX) * this.progress;
+                    this.y = this.startY + (this.endY - this.startY) * this.progress;
+                }
+            }
+
+            draw() {
+                ctx.fillStyle = this.waiting ? '#FFD700' : '#4CAF50';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            isComplete() {
+                return this.progress >= 1;
+            }
+        }
+
+        // Setup camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        }
+
+        // Load face detection model
+        async function loadModel() {
+            model = await facemesh.load({ maxFaces: 1 });
+        }
+
+        // Detect face and get head tilt
+        async function detectFace() {
+            if (!gameStarted) return;
+
+            const predictions = await model.estimateFaces(video);
+
+            if (predictions.length > 0) {
+                const face = predictions[0];
+                const noseTip = face.scaledMesh[1];
+                const leftEye = face.scaledMesh[33];
+                const rightEye = face.scaledMesh[263];
+
+                // Calculate head tilt X (left/right)
+                const eyeMidX = (leftEye[0] + rightEye[0]) / 2;
+                headTiltX = (eyeMidX / video.videoWidth - 0.5) * 2;
+
+                // Calculate head tilt Y (up/down)
+                const eyeMidY = (leftEye[1] + rightEye[1]) / 2;
+                headTiltY = (eyeMidY / video.videoHeight - 0.5) * 2;
+
+                // Switch lights based on head tilt X
+                const now = Date.now();
+                if (Math.abs(headTiltX) > 0.3 && now - lastLightSwitch > 1000) {
+                    horizontalGreen = headTiltX < 0; // Tilt left = horizontal, tilt right = vertical
+                    lastLightSwitch = now;
+                }
+
+                // Toggle crosswalk based on head tilt Y
+                if (Math.abs(headTiltY) > 0.3 && now - lastCrosswalkToggle > 1000) {
+                    crosswalkOpen = headTiltY < 0; // Look up = open crosswalk
+                    lastCrosswalkToggle = now;
+                }
+            }
+        }
+
+        // Spawn vehicles
+        function spawnVehicle() {
+            const directions = ['north', 'south', 'east', 'west'];
+            const direction = directions[Math.floor(Math.random() * directions.length)];
+
+            let type = 'car';
+            const rand = Math.random();
+            const rushMultiplier = gameTime > 30 ? 2 : 1;
+
+            if (rand < 0.05 * rushMultiplier) type = 'emergency';
+            else if (rand < 0.15 * rushMultiplier) type = 'bus';
+            else if (rand < 0.25 * rushMultiplier) type = 'truck';
+
+            vehicles.push(new Vehicle(direction, type));
+        }
+
+        // Spawn pedestrians
+        function spawnPedestrian() {
+            const sides = ['top', 'bottom'];
+            const side = sides[Math.floor(Math.random() * sides.length)];
+            pedestrians.push(new Pedestrian(side));
+        }
+
+        // Draw intersection
+        function drawIntersection() {
+            // Background
+            ctx.fillStyle = '#2d5016';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Roads
+            ctx.fillStyle = '#404040';
+            // Horizontal road
+            ctx.fillRect(0, intersectionY - roadWidth, canvas.width, roadWidth * 2);
+            // Vertical road
+            ctx.fillRect(intersectionX - roadWidth, 0, roadWidth * 2, canvas.height);
+
+            // Road lines
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([20, 20]);
+
+            // Horizontal center line
+            ctx.beginPath();
+            ctx.moveTo(0, intersectionY);
+            ctx.lineTo(canvas.width, intersectionY);
+            ctx.stroke();
+
+            // Vertical center line
+            ctx.beginPath();
+            ctx.moveTo(intersectionX, 0);
+            ctx.lineTo(intersectionX, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Intersection center
+            ctx.fillStyle = '#505050';
+            ctx.fillRect(intersectionX - roadWidth, intersectionY - roadWidth, roadWidth * 2, roadWidth * 2);
+
+            // Crosswalks
+            ctx.fillStyle = crosswalkOpen ? '#FFFFFF' : '#808080';
+            ctx.fillRect(intersectionX - roadWidth - 40, intersectionY - roadWidth - 20, roadWidth * 2 + 80, 15);
+            ctx.fillRect(intersectionX - roadWidth - 40, intersectionY + roadWidth + 5, roadWidth * 2 + 80, 15);
+        }
+
+        // Draw traffic lights
+        function drawTrafficLights() {
+            const lightSize = 30;
+            const positions = [
+                { x: intersectionX - roadWidth - 60, y: intersectionY - roadWidth - 60, type: 'horizontal' },
+                { x: intersectionX + roadWidth + 30, y: intersectionY - roadWidth - 60, type: 'vertical' },
+                { x: intersectionX + roadWidth + 30, y: intersectionY + roadWidth + 30, type: 'horizontal' },
+                { x: intersectionX - roadWidth - 60, y: intersectionY + roadWidth + 30, type: 'vertical' }
+            ];
+
+            positions.forEach(pos => {
+                const isGreen = (pos.type === 'horizontal' && horizontalGreen) ||
+                               (pos.type === 'vertical' && !horizontalGreen);
+
+                // Light housing
+                ctx.fillStyle = '#333';
+                ctx.fillRect(pos.x, pos.y, lightSize, lightSize * 2);
+
+                // Red light
+                ctx.fillStyle = isGreen ? '#440000' : '#FF0000';
+                ctx.beginPath();
+                ctx.arc(pos.x + lightSize/2, pos.y + lightSize/2, lightSize/3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Green light
+                ctx.fillStyle = isGreen ? '#00FF00' : '#004400';
+                ctx.beginPath();
+                ctx.arc(pos.x + lightSize/2, pos.y + lightSize * 1.5, lightSize/3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // Check collisions
+        function checkCollisions() {
+            for (let i = 0; i < vehicles.length; i++) {
+                for (let j = i + 1; j < vehicles.length; j++) {
+                    const v1 = vehicles[i];
+                    const v2 = vehicles[j];
+
+                    const distance = Math.sqrt(Math.pow(v1.x - v2.x, 2) + Math.pow(v1.y - v2.y, 2));
+
+                    if (distance < 60) {
+                        nearMisses++;
+                        flowScore -= 10;
+                        showMessage('Near Miss!');
+                    }
+                }
+            }
+        }
+
+        // Show message
+        function showMessage(text) {
+            messageDiv.textContent = text;
+            messageDiv.style.opacity = 1;
+            setTimeout(() => {
+                messageDiv.style.opacity = 0;
+            }, 1500);
+        }
+
+        // Update stats
+        function updateStats() {
+            document.getElementById('flowScore').textContent = Math.max(0, flowScore);
+            document.getElementById('vehiclesPassed').textContent = vehiclesPassed;
+            document.getElementById('nearMisses').textContent = nearMisses;
+
+            const minutes = Math.floor(gameTime);
+            const seconds = Math.floor((gameTime % 1) * 60);
+            document.getElementById('timeDisplay').textContent =
+                `${minutes}:${String(seconds).padStart(2, '0')}`;
+
+            document.getElementById('rushHour').textContent = gameTime > 30 ? 'RUSH HOUR!' : 'Normal';
+            document.getElementById('activeLight').textContent = horizontalGreen ? 'Horizontal' : 'Vertical';
+            document.getElementById('crosswalkStatus').textContent = crosswalkOpen ? 'WALK' : 'DON\'T WALK';
+        }
+
+        // Main animation loop
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawIntersection();
+            drawTrafficLights();
+
+            // Update and draw pedestrians
+            pedestrians = pedestrians.filter(p => !p.isComplete());
+            pedestrians.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            // Update and draw vehicles
+            vehicles.forEach((v, index) => {
+                v.update();
+                v.draw();
+
+                // Check if passed through intersection
+                if (v.isOffScreen()) {
+                    vehicles.splice(index, 1);
+                    vehiclesPassed++;
+                    flowScore += v.type === 'emergency' ? 10 : 5;
+
+                    if (v.type === 'emergency') {
+                        showMessage('Emergency Vehicle Cleared!');
+                    }
+                }
+            });
+
+            // Spawn new vehicles
+            const spawnRate = gameTime > 30 ? 0.03 : 0.02;
+            if (Math.random() < spawnRate) {
+                spawnVehicle();
+            }
+
+            // Spawn pedestrians
+            if (Math.random() < 0.005) {
+                spawnPedestrian();
+            }
+
+            // Check collisions
+            checkCollisions();
+
+            // Increment flow score for smooth traffic
+            if (vehicles.length > 0) {
+                const movingVehicles = vehicles.filter(v => !v.stopped).length;
+                flowScore += movingVehicles * 0.01;
+            }
+
+            gameTime += 1/60;
+            updateStats();
+            detectFace();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start button handler
+        startButton.addEventListener('click', async () => {
+            instructions.style.display = 'none';
+
+            try {
+                await setupCamera();
+                await loadModel();
+
+                gameStarted = true;
+                showMessage('Control the Intersection!');
+
+                // Spawn initial vehicles
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => spawnVehicle(), i * 2000);
+                }
+
+                animate();
+
+            } catch (error) {
+                alert('Camera access is required for head tracking. Please allow camera access and refresh the page.');
+                console.error(error);
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>

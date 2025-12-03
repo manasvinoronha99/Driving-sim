@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mindful Driving Companion</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            background: #87CEEB;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #video {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid white;
+            border-radius: 8px;
+            transform: scaleX(-1);
+            z-index: 100;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 500px;
+            z-index: 200;
+        }
+
+        #instructions h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        #instructions p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        #startButton {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+
+        #startButton:hover {
+            background: #45a049;
+        }
+
+        #stats {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        .stat-item {
+            margin-bottom: 10px;
+        }
+
+        #breathingCue {
+            display: none;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 32px;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 100;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+
+    <div id="instructions">
+        <h2>🚗 Head-Tracking Driving Simulator</h2>
+        <p>Use your <strong>head movements</strong> to steer the car left and right.</p>
+        <p>Navigate through traffic and avoid obstacles on the road. As day transitions to night, more challenges appear.</p>
+        <p><strong>Tilt your head to change lanes and avoid collisions.</strong></p>
+        <button id="startButton">Start Driving</button>
+    </div>
+
+    <div id="stats">
+        <div class="stat-item">Flow Time: <span id="flowTime">0:00</span></div>
+        <div class="stat-item">Phase: <span id="phase">Dawn</span></div>
+        <div class="stat-item">Steadiness: <span id="steadiness">Perfect</span></div>
+    </div>
+
+    <div id="breathingCue">Breathe in... Breathe out...</div>
+    <div id="message"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/facemesh"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const instructions = document.getElementById('instructions');
+        const startButton = document.getElementById('startButton');
+        const breathingCue = document.getElementById('breathingCue');
+        const messageDiv = document.getElementById('message');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let model;
+        let carX = canvas.width / 2;
+        let roadOffset = 0;
+        let trees = [];
+        let obstacles = [];
+        let timeOfDay = 0; // 0 = day, 1 = night
+        let flowTime = 0;
+        let headPosition = 0.25; // Start on left lane (0 = far left, 0.5 = center, 1 = far right)
+        let smoothHeadPosition = 0.25;
+        let steadinessScore = 100;
+        let lastHeadMovement = Date.now();
+        let breathingPhase = 0;
+        let gameStarted = false;
+
+        // Initialize trees
+        function initTrees() {
+            trees = [];
+            for (let i = 0; i < 30; i++) {
+                trees.push({
+                    x: Math.random() < 0.5 ? Math.random() * canvas.width * 0.25 : canvas.width * 0.75 + Math.random() * canvas.width * 0.25,
+                    y: Math.random() * canvas.height * 2,
+                    size: 20 + Math.random() * 30
+                });
+            }
+        }
+
+        // Initialize obstacles (for night time)
+        function initObstacles() {
+            obstacles = [];
+        }
+
+        function addObstacle() {
+            const laneWidth = canvas.width * 0.5 / 3;
+            const lane = Math.floor(Math.random() * 3);
+            obstacles.push({
+                x: canvas.width * 0.25 + lane * laneWidth + laneWidth / 2,
+                y: -100,
+                size: 40
+            });
+        }
+
+        // Add multiple obstacles at start
+        function spawnObstacles() {
+            // Spawn obstacles more frequently
+            if (Math.random() < 0.03) {
+                addObstacle();
+            }
+        }
+
+        // Setup camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        }
+
+        // Load face detection model
+        async function loadModel() {
+            model = await facemesh.load({ maxFaces: 1 });
+        }
+
+        // Detect face and get head position
+        async function detectFace() {
+            if (!gameStarted) return;
+
+            const predictions = await model.estimateFaces(video);
+
+            if (predictions.length > 0) {
+                const face = predictions[0];
+                const noseTip = face.scaledMesh[1]; // Nose tip landmark
+
+                // Normalize position (0 = left, 1 = right)
+                headPosition = noseTip[0] / video.videoWidth;
+
+                // Update steadiness
+                const movement = Math.abs(smoothHeadPosition - headPosition);
+                if (movement < 0.02) {
+                    steadinessScore = Math.min(100, steadinessScore + 0.5);
+                } else {
+                    steadinessScore = Math.max(0, steadinessScore - movement * 50);
+                }
+
+                lastHeadMovement = Date.now();
+            }
+
+            // Smooth the head position for car movement
+            smoothHeadPosition += (headPosition - smoothHeadPosition) * 0.1;
+        }
+
+        // Draw road
+        function drawRoad() {
+            const roadWidth = canvas.width * 0.5;
+            const roadLeft = canvas.width * 0.25;
+
+            // Sky color based on time of day
+            const skyColor = timeOfDay < 0.5
+                ? `rgb(${135 - timeOfDay * 100}, ${206 - timeOfDay * 100}, ${235 - timeOfDay * 100})`
+                : `rgb(${35 + (1 - timeOfDay) * 100}, ${35 + (1 - timeOfDay) * 100}, ${60 + (1 - timeOfDay) * 100})`;
+
+            ctx.fillStyle = skyColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Ground/grass
+            const grassColor = timeOfDay < 0.5
+                ? `rgb(${100 - timeOfDay * 50}, ${150 - timeOfDay * 80}, ${100 - timeOfDay * 50})`
+                : `rgb(${40}, ${60}, ${40})`;
+
+            ctx.fillStyle = grassColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Road
+            const roadColor = timeOfDay < 0.5 ? '#808080' : '#404040';
+            ctx.fillStyle = roadColor;
+
+            // Perspective road
+            for (let i = 0; i < canvas.height; i += 2) {
+                const perspective = i / canvas.height;
+                const width = roadWidth * (0.3 + perspective * 0.7);
+                const left = canvas.width / 2 - width / 2;
+
+                ctx.fillRect(left, i, width, 2);
+            }
+
+            // Road lines
+            ctx.strokeStyle = timeOfDay < 0.5 ? '#FFFFFF' : '#888888';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([20, 30]);
+
+            // Center line
+            ctx.beginPath();
+            for (let i = 0; i < canvas.height; i += 2) {
+                const perspective = i / canvas.height;
+                const y = i + (roadOffset % 50);
+                if (y < canvas.height) {
+                    ctx.moveTo(canvas.width / 2, y);
+                    ctx.lineTo(canvas.width / 2, y + 1);
+                }
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Draw trees
+        function drawTrees() {
+            trees.forEach(tree => {
+                const treeY = (tree.y + roadOffset) % (canvas.height * 2);
+                const perspective = treeY / canvas.height;
+                const size = tree.size * (0.5 + perspective * 0.5);
+
+                // Tree trunk
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(tree.x - size * 0.15, treeY - size * 0.3, size * 0.3, size * 0.3);
+
+                // Tree foliage - triangular shape like wireframe
+                ctx.fillStyle = timeOfDay < 0.5 ? '#7C9473' : '#4A5F45';
+                ctx.beginPath();
+                ctx.moveTo(tree.x, treeY - size);
+                ctx.lineTo(tree.x - size * 0.5, treeY);
+                ctx.lineTo(tree.x + size * 0.5, treeY);
+                ctx.closePath();
+                ctx.fill();
+            });
+        }
+
+        // Draw car (mini car from top-down view)
+        function drawCar() {
+            const roadWidth = canvas.width * 0.5;
+            const roadLeft = canvas.width * 0.25;
+
+            // Map head position to road position
+            carX = roadLeft + (smoothHeadPosition * roadWidth);
+            const carY = canvas.height * 0.75;
+
+            // Car body (rounded rectangle)
+            ctx.fillStyle = '#FF6B6B';
+            ctx.beginPath();
+            ctx.roundRect(carX - 20, carY - 30, 40, 60, 8);
+            ctx.fill();
+
+            // Car windshield (front)
+            ctx.fillStyle = '#4A90E2';
+            ctx.beginPath();
+            ctx.roundRect(carX - 15, carY - 25, 30, 20, 5);
+            ctx.fill();
+
+            // Car wheels (left side)
+            ctx.fillStyle = '#2C3E50';
+            ctx.fillRect(carX - 22, carY - 20, 6, 15);
+            ctx.fillRect(carX - 22, carY + 5, 6, 15);
+
+            // Car wheels (right side)
+            ctx.fillRect(carX + 16, carY - 20, 6, 15);
+            ctx.fillRect(carX + 16, carY + 5, 6, 15);
+
+            // Car roof (darker top)
+            ctx.fillStyle = '#E85555';
+            ctx.beginPath();
+            ctx.roundRect(carX - 12, carY - 15, 24, 15, 4);
+            ctx.fill();
+        }
+
+        // Draw obstacles (squares like in wireframe)
+        function drawObstacles() {
+            obstacles.forEach((obs, index) => {
+                obs.y += 3 + timeOfDay * 2;
+
+                const perspective = obs.y / canvas.height;
+                const size = obs.size * (0.3 + perspective * 0.7);
+
+                // Black square obstacle
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(obs.x - size / 2, obs.y - size / 2, size, size);
+
+                // Check collision
+                const distance = Math.sqrt(Math.pow(carX - obs.x, 2) + Math.pow(canvas.height * 0.75 - obs.y, 2));
+                if (distance < 50) {
+                    steadinessScore = Math.max(0, steadinessScore - 10);
+                    showMessage('Stay Focused!');
+                }
+
+                // Remove off-screen obstacles
+                if (obs.y > canvas.height + 100) {
+                    obstacles.splice(index, 1);
+                }
+            });
+        }
+
+        // Update breathing cue
+        function updateBreathingCue() {
+            breathingPhase = (breathingPhase + 0.02) % 2;
+            const phase = breathingPhase < 1 ? 'in' : 'out';
+            const opacity = Math.sin(breathingPhase * Math.PI);
+
+            breathingCue.style.opacity = opacity * 0.7;
+            breathingCue.textContent = phase === 'in' ? 'Breathe in...' : 'Breathe out...';
+        }
+
+        // Show message
+        function showMessage(text) {
+            messageDiv.textContent = text;
+            messageDiv.style.opacity = 1;
+            setTimeout(() => {
+                messageDiv.style.opacity = 0;
+            }, 2000);
+        }
+
+        // Update stats
+        function updateStats() {
+            flowTime += 1/60;
+            document.getElementById('flowTime').textContent =
+                `${Math.floor(flowTime / 60)}:${String(Math.floor(flowTime % 60)).padStart(2, '0')}`;
+
+            const phases = ['Dawn', 'Morning', 'Afternoon', 'Dusk', 'Night'];
+            const phaseIndex = Math.floor(timeOfDay * 5);
+            document.getElementById('phase').textContent = phases[Math.min(phaseIndex, 4)];
+
+            let steadinessText = 'Perfect';
+            if (steadinessScore < 30) steadinessText = 'Restless';
+            else if (steadinessScore < 60) steadinessText = 'Moderate';
+            else if (steadinessScore < 90) steadinessText = 'Steady';
+
+            document.getElementById('steadiness').textContent = steadinessText;
+        }
+
+        // Main animation loop
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw scene
+            drawRoad();
+            drawTrees();
+            drawObstacles();
+            drawCar();
+
+            // Update road offset for movement
+            roadOffset += 2;
+
+            // Gradually transition to night
+            timeOfDay = Math.min(1, timeOfDay + 0.0002);
+
+            // Spawn obstacles continuously
+            spawnObstacles();
+
+            // Update breathing cue
+            updateBreathingCue();
+
+            // Update stats
+            updateStats();
+
+            // Detect face
+            detectFace();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start button handler
+        startButton.addEventListener('click', async () => {
+            instructions.style.display = 'none';
+
+            try {
+                await setupCamera();
+                await loadModel();
+
+                initTrees();
+                initObstacles();
+
+                gameStarted = true;
+                showMessage('Center Your Head to Begin');
+
+                animate();
+
+            } catch (error) {
+                alert('Camera access is required for head tracking. Please allow camera access and refresh the page.');
+                console.error(error);
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            initTrees();
+        });
+    </script>
+</body>
+</html>

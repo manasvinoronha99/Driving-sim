@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Memory Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #video {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid white;
+            border-radius: 8px;
+            transform: scaleX(-1);
+            z-index: 100;
+            display: none;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 600px;
+            z-index: 200;
+        }
+
+        #instructions h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        #instructions p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        #startButton {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.3s;
+        }
+
+        #startButton:hover {
+            transform: scale(1.05);
+        }
+
+        #stats {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        .stat-item {
+            margin-bottom: 10px;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 100;
+            text-align: center;
+        }
+
+        #timer {
+            position: absolute;
+            top: 20px;
+            right: 180px;
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.8);
+            padding: 20px 40px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        #accuracy {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 24px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px 30px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        #colorGuide {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        .color-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .color-box {
+            width: 20px;
+            height: 20px;
+            border: 2px solid white;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+
+    <div id="instructions">
+        <h2>🎭 Shadow Memory Game</h2>
+        <p><strong>Simon-says style game with your body!</strong></p>
+        <p>1. Watch the colored shadow pattern displayed on screen</p>
+        <p>2. Memorize which body parts light up in which colors</p>
+        <p>3. Recreate the pattern with your body within the time limit</p>
+        <p><strong>Color coding:</strong></p>
+        <ul style="text-align: left; max-width: 400px; margin: 20px auto; list-style: none;">
+            <li style="margin: 10px 0;">🔴 <strong>Red:</strong> Left arm raised</li>
+            <li style="margin: 10px 0;">🔵 <strong>Blue:</strong> Right arm raised</li>
+            <li style="margin: 10px 0;">💚 <strong>Green:</strong> Arms spread (T-pose)</li>
+            <li style="margin: 10px 0;">🟡 <strong>Yellow:</strong> Crouch down</li>
+        </ul>
+        <p>Patterns get progressively more complex!</p>
+        <button id="startButton">Start Game</button>
+    </div>
+
+    <div id="stats">
+        <div class="stat-item">Level: <span id="level">1</span></div>
+        <div class="stat-item">Score: <span id="score">0</span></div>
+        <div class="stat-item">Best Streak: <span id="streak">0</span></div>
+    </div>
+
+    <div id="timer">5</div>
+    <div id="accuracy">Match: 0%</div>
+
+    <div id="colorGuide">
+        <div><strong>Body Part Guide:</strong></div>
+        <div class="color-item">
+            <div class="color-box" style="background: #FF4444;"></div>
+            <span>Left Arm Up</span>
+        </div>
+        <div class="color-item">
+            <div class="color-box" style="background: #4444FF;"></div>
+            <span>Right Arm Up</span>
+        </div>
+        <div class="color-item">
+            <div class="color-box" style="background: #44FF44;"></div>
+            <span>T-Pose</span>
+        </div>
+        <div class="color-item">
+            <div class="color-box" style="background: #FFFF44;"></div>
+            <span>Crouch</span>
+        </div>
+    </div>
+
+    <div id="message"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const instructions = document.getElementById('instructions');
+        const startButton = document.getElementById('startButton');
+        const messageDiv = document.getElementById('message');
+        const timerDiv = document.getElementById('timer');
+        const accuracyDiv = document.getElementById('accuracy');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let detector;
+        let gameStarted = false;
+        let currentPose = null;
+
+        // Game state
+        let level = 1;
+        let score = 0;
+        let bestStreak = 0;
+        let currentStreak = 0;
+        let gamePhase = 'showing'; // 'showing', 'memorizing', 'matching'
+        let targetPattern = [];
+        let timeRemaining = 5;
+        let lastTimerUpdate = Date.now();
+        let matchAccuracy = 0;
+
+        const poses = {
+            leftArmUp: { name: 'Left Arm Up', color: { r: 255, g: 68, b: 68 } },
+            rightArmUp: { name: 'Right Arm Up', color: { r: 68, g: 68, b: 255 } },
+            tPose: { name: 'T-Pose', color: { r: 68, g: 255, b: 68 } },
+            crouch: { name: 'Crouch', color: { r: 255, g: 255, b: 68 } }
+        };
+
+        // Setup camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        }
+
+        // Load pose detection model
+        async function loadModel() {
+            const model = poseDetection.SupportedModels.MoveNet;
+            const detectorConfig = {
+                modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            };
+            detector = await poseDetection.createDetector(model, detectorConfig);
+        }
+
+        // Detect current pose
+        async function detectCurrentPose() {
+            if (!gameStarted || gamePhase !== 'matching') return;
+
+            const predictions = await detector.estimatePoses(video);
+
+            if (predictions.length > 0) {
+                const pose = predictions[0];
+                currentPose = analyzePose(pose);
+            }
+        }
+
+        // Analyze pose to determine what position user is in
+        function analyzePose(pose) {
+            const keypoints = pose.keypoints;
+            const detectedPoses = [];
+
+            const leftShoulder = keypoints.find(kp => kp.name === 'left_shoulder');
+            const rightShoulder = keypoints.find(kp => kp.name === 'right_shoulder');
+            const leftWrist = keypoints.find(kp => kp.name === 'left_wrist');
+            const rightWrist = keypoints.find(kp => kp.name === 'right_wrist');
+            const leftHip = keypoints.find(kp => kp.name === 'left_hip');
+            const rightHip = keypoints.find(kp => kp.name === 'right_hip');
+
+            // Check left arm up
+            if (leftWrist && leftShoulder && leftWrist.score > 0.3 && leftShoulder.score > 0.3) {
+                if (leftWrist.y < leftShoulder.y - 80) {
+                    detectedPoses.push('leftArmUp');
+                }
+            }
+
+            // Check right arm up
+            if (rightWrist && rightShoulder && rightWrist.score > 0.3 && rightShoulder.score > 0.3) {
+                if (rightWrist.y < rightShoulder.y - 80) {
+                    detectedPoses.push('rightArmUp');
+                }
+            }
+
+            // Check T-pose
+            if (leftWrist && rightWrist && leftShoulder && rightShoulder) {
+                const armSpan = Math.abs(leftWrist.x - rightWrist.x);
+                const shoulderSpan = Math.abs(leftShoulder.x - rightShoulder.x);
+                const leftArmHorizontal = Math.abs(leftWrist.y - leftShoulder.y) < 80;
+                const rightArmHorizontal = Math.abs(rightWrist.y - rightShoulder.y) < 80;
+
+                if (armSpan > shoulderSpan * 1.8 && leftArmHorizontal && rightArmHorizontal) {
+                    detectedPoses.push('tPose');
+                }
+            }
+
+            // Check crouch
+            if (leftHip && leftShoulder && leftHip.score > 0.3 && leftShoulder.score > 0.3) {
+                const torsoHeight = Math.abs(leftShoulder.y - leftHip.y);
+                if (torsoHeight < 100) {
+                    detectedPoses.push('crouch');
+                }
+            }
+
+            return detectedPoses;
+        }
+
+        // Generate random pattern
+        function generatePattern() {
+            const poseKeys = Object.keys(poses);
+            const patternLength = Math.min(1 + Math.floor(level / 2), 4);
+            const pattern = [];
+
+            for (let i = 0; i < patternLength; i++) {
+                const randomPose = poseKeys[Math.floor(Math.random() * poseKeys.length)];
+                pattern.push(randomPose);
+            }
+
+            return pattern;
+        }
+
+        // Draw pattern display
+        function drawPattern(pattern, alpha = 1) {
+            const spacing = 150;
+            const startX = canvas.width / 2 - (pattern.length - 1) * spacing / 2;
+            const centerY = canvas.height / 2;
+
+            pattern.forEach((poseKey, index) => {
+                const pose = poses[poseKey];
+                const x = startX + index * spacing;
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+
+                // Draw shadow blob
+                const gradient = ctx.createRadialGradient(x, centerY, 0, x, centerY, 60);
+                gradient.addColorStop(0, `rgba(${pose.color.r}, ${pose.color.g}, ${pose.color.b}, 0.8)`);
+                gradient.addColorStop(1, `rgba(${pose.color.r}, ${pose.color.g}, ${pose.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, centerY, 60, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw pose icon
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+
+                // Head
+                ctx.beginPath();
+                ctx.arc(x, centerY - 30, 10, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Body
+                ctx.beginPath();
+                ctx.moveTo(x, centerY - 20);
+                ctx.lineTo(x, centerY + 20);
+                ctx.stroke();
+
+                // Arms based on pose
+                if (poseKey === 'leftArmUp') {
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x - 25, centerY - 40);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x + 25, centerY);
+                    ctx.stroke();
+                } else if (poseKey === 'rightArmUp') {
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x - 25, centerY);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x + 25, centerY - 40);
+                    ctx.stroke();
+                } else if (poseKey === 'tPose') {
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x - 35, centerY - 10);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x + 35, centerY - 10);
+                    ctx.stroke();
+                } else if (poseKey === 'crouch') {
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x - 20, centerY + 10);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, centerY - 10);
+                    ctx.lineTo(x + 20, centerY + 10);
+                    ctx.stroke();
+                }
+
+                // Legs
+                ctx.beginPath();
+                ctx.moveTo(x, centerY + 20);
+                ctx.lineTo(x - 15, centerY + 45);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x, centerY + 20);
+                ctx.lineTo(x + 15, centerY + 45);
+                ctx.stroke();
+
+                // Label
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(pose.name, x, centerY + 80);
+
+                ctx.restore();
+            });
+        }
+
+        // Draw user's current pose
+        function drawUserPose() {
+            if (!currentPose || currentPose.length === 0) return;
+
+            const x = canvas.width / 2;
+            const y = canvas.height * 0.75;
+
+            currentPose.forEach(poseKey => {
+                const pose = poses[poseKey];
+
+                // Draw glow around user
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, 100);
+                gradient.addColorStop(0, `rgba(${pose.color.r}, ${pose.color.g}, ${pose.color.b}, 0.4)`);
+                gradient.addColorStop(1, `rgba(${pose.color.r}, ${pose.color.g}, ${pose.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, 100, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // Calculate match accuracy
+        function calculateAccuracy() {
+            if (!currentPose || targetPattern.length === 0) return 0;
+
+            let matches = 0;
+            targetPattern.forEach(targetPose => {
+                if (currentPose.includes(targetPose)) {
+                    matches++;
+                }
+            });
+
+            // Penalty for extra poses
+            const extraPoses = Math.max(0, currentPose.length - targetPattern.length);
+            const accuracy = ((matches - extraPoses) / targetPattern.length) * 100;
+
+            return Math.max(0, Math.round(accuracy));
+        }
+
+        // Show message
+        function showMessage(text, duration = 2000) {
+            messageDiv.textContent = text;
+            messageDiv.style.opacity = 1;
+            setTimeout(() => {
+                messageDiv.style.opacity = 0;
+            }, duration);
+        }
+
+        // Update stats
+        function updateStats() {
+            document.getElementById('level').textContent = level;
+            document.getElementById('score').textContent = score;
+            document.getElementById('streak').textContent = bestStreak;
+        }
+
+        // Start new round
+        function startNewRound() {
+            targetPattern = generatePattern();
+            gamePhase = 'showing';
+            timeRemaining = 3;
+            currentPose = null;
+            matchAccuracy = 0;
+
+            showMessage('Memorize the pattern!', 3000);
+
+            setTimeout(() => {
+                gamePhase = 'memorizing';
+                timeRemaining = 5 + level;
+                lastTimerUpdate = Date.now();
+                showMessage('Recreate the pattern!', 2000);
+
+                setTimeout(() => {
+                    gamePhase = 'matching';
+                }, 2000);
+            }, 3000);
+        }
+
+        // Check if round complete
+        function checkRoundComplete() {
+            if (gamePhase !== 'matching') return;
+
+            const now = Date.now();
+            if (now - lastTimerUpdate >= 1000) {
+                timeRemaining--;
+                lastTimerUpdate = now;
+                timerDiv.textContent = timeRemaining;
+
+                if (timeRemaining <= 0) {
+                    // Time's up
+                    const accuracy = calculateAccuracy();
+
+                    if (accuracy >= 80) {
+                        score += level * 10;
+                        currentStreak++;
+                        bestStreak = Math.max(bestStreak, currentStreak);
+                        level++;
+                        showMessage(`Perfect! +${level * 10} points`, 2000);
+                    } else if (accuracy >= 50) {
+                        score += level * 5;
+                        currentStreak = 0;
+                        showMessage(`Good! +${level * 5} points`, 2000);
+                    } else {
+                        currentStreak = 0;
+                        level = Math.max(1, level - 1);
+                        showMessage('Try Again!', 2000);
+                    }
+
+                    updateStats();
+
+                    setTimeout(() => {
+                        startNewRound();
+                    }, 2500);
+                }
+            }
+
+            // Update accuracy display
+            matchAccuracy = calculateAccuracy();
+            accuracyDiv.textContent = `Match: ${matchAccuracy}%`;
+            if (matchAccuracy >= 80) {
+                accuracyDiv.style.color = '#44FF44';
+            } else if (matchAccuracy >= 50) {
+                accuracyDiv.style.color = '#FFFF44';
+            } else {
+                accuracyDiv.style.color = '#FF4444';
+            }
+        }
+
+        // Main animation loop
+        function animate() {
+            // Clear canvas
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (gamePhase === 'showing' || gamePhase === 'memorizing') {
+                drawPattern(targetPattern, gamePhase === 'showing' ? 1 : 0.3);
+            } else if (gamePhase === 'matching') {
+                drawPattern(targetPattern, 0.2);
+                drawUserPose();
+                checkRoundComplete();
+            }
+
+            detectCurrentPose();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start button handler
+        startButton.addEventListener('click', async () => {
+            instructions.style.display = 'none';
+
+            try {
+                await setupCamera();
+                await loadModel();
+
+                gameStarted = true;
+                updateStats();
+                startNewRound();
+
+                animate();
+
+            } catch (error) {
+                alert('Camera access is required for body tracking. Please allow camera access and refresh the page.');
+                console.error(error);
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>

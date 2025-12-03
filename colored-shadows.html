@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Colored Shadows</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #video {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid white;
+            border-radius: 8px;
+            transform: scaleX(-1);
+            z-index: 100;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 600px;
+            z-index: 200;
+        }
+
+        #instructions h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        #instructions p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        #startButton {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.3s;
+        }
+
+        #startButton:hover {
+            transform: scale(1.05);
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 16px;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        .control-item {
+            margin-bottom: 10px;
+        }
+
+        #shapeDetected {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 24px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px 30px;
+            border-radius: 20px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #colorPalette {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        .color-indicator {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+
+    <div id="instructions">
+        <h2>🎨 Colored Shadows</h2>
+        <p>Your body movements create colored shadows on screen!</p>
+        <p><strong>Move different body parts</strong> to create shadows in different colors:</p>
+        <ul style="text-align: left; max-width: 400px; margin: 20px auto;">
+            <li style="margin: 10px 0;">🔴 <strong>Head & Torso:</strong> Red shadows</li>
+            <li style="margin: 10px 0;">🔵 <strong>Left Arm:</strong> Blue shadows</li>
+            <li style="margin: 10px 0;">💚 <strong>Right Arm:</strong> Green shadows</li>
+            <li style="margin: 10px 0;">🟡 <strong>Legs:</strong> Yellow shadows</li>
+        </ul>
+        <p><strong>Overlap your shadows</strong> to mix colors and create new ones!</p>
+        <p>Make specific shapes to trigger special illustrations.</p>
+        <button id="startButton">Start Creating</button>
+    </div>
+
+    <div id="controls">
+        <div class="control-item">Active Shadows: <span id="shadowCount">0</span></div>
+        <div class="control-item">Colors Mixed: <span id="colorsMixed">0</span></div>
+    </div>
+
+    <div id="shapeDetected"></div>
+
+    <div id="colorPalette">
+        <div class="color-indicator" style="background: #FF4444;"></div>
+        <div class="color-indicator" style="background: #4444FF;"></div>
+        <div class="color-indicator" style="background: #44FF44;"></div>
+        <div class="color-indicator" style="background: #FFFF44;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const instructions = document.getElementById('instructions');
+        const startButton = document.getElementById('startButton');
+        const shapeDetectedDiv = document.getElementById('shapeDetected');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let detector;
+        let gameStarted = false;
+        let poses = [];
+        let shadowTrails = [];
+        let colorsMixed = 0;
+
+        const bodyPartColors = {
+            head: { r: 255, g: 68, b: 68, name: 'Red' },
+            torso: { r: 255, g: 68, b: 68, name: 'Red' },
+            leftArm: { r: 68, g: 68, b: 255, name: 'Blue' },
+            rightArm: { r: 68, g: 255, b: 68, name: 'Green' },
+            legs: { r: 255, g: 255, b: 68, name: 'Yellow' }
+        };
+
+        class ShadowTrail {
+            constructor(x, y, color, bodyPart) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.bodyPart = bodyPart;
+                this.alpha = 0.6;
+                this.radius = 60;
+                this.age = 0;
+                this.maxAge = 30;
+            }
+
+            update() {
+                this.age++;
+                this.alpha = 0.6 * (1 - this.age / this.maxAge);
+            }
+
+            draw() {
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+                gradient.addColorStop(0, `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.alpha})`);
+                gradient.addColorStop(1, `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+            }
+
+            isDead() {
+                return this.age >= this.maxAge;
+            }
+        }
+
+        // Setup camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        }
+
+        // Load pose detection model
+        async function loadModel() {
+            const model = poseDetection.SupportedModels.MoveNet;
+            const detectorConfig = {
+                modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            };
+            detector = await poseDetection.createDetector(model, detectorConfig);
+        }
+
+        // Detect poses
+        async function detectPose() {
+            if (!gameStarted) return;
+
+            poses = await detector.estimatePoses(video);
+        }
+
+        // Get body part position
+        function getBodyPartPosition(pose, partName) {
+            const keypoints = pose.keypoints;
+
+            if (partName === 'head') {
+                const nose = keypoints.find(kp => kp.name === 'nose');
+                if (nose && nose.score > 0.3) {
+                    return {
+                        x: (1 - nose.x / video.videoWidth) * canvas.width,
+                        y: nose.y / video.videoHeight * canvas.height
+                    };
+                }
+            } else if (partName === 'torso') {
+                const leftShoulder = keypoints.find(kp => kp.name === 'left_shoulder');
+                const rightShoulder = keypoints.find(kp => kp.name === 'right_shoulder');
+                if (leftShoulder && rightShoulder && leftShoulder.score > 0.3 && rightShoulder.score > 0.3) {
+                    const x = (leftShoulder.x + rightShoulder.x) / 2;
+                    const y = (leftShoulder.y + rightShoulder.y) / 2;
+                    return {
+                        x: (1 - x / video.videoWidth) * canvas.width,
+                        y: y / video.videoHeight * canvas.height
+                    };
+                }
+            } else if (partName === 'leftArm') {
+                const leftWrist = keypoints.find(kp => kp.name === 'left_wrist');
+                const leftElbow = keypoints.find(kp => kp.name === 'left_elbow');
+                if (leftWrist && leftWrist.score > 0.3) {
+                    return {
+                        x: (1 - leftWrist.x / video.videoWidth) * canvas.width,
+                        y: leftWrist.y / video.videoHeight * canvas.height
+                    };
+                } else if (leftElbow && leftElbow.score > 0.3) {
+                    return {
+                        x: (1 - leftElbow.x / video.videoWidth) * canvas.width,
+                        y: leftElbow.y / video.videoHeight * canvas.height
+                    };
+                }
+            } else if (partName === 'rightArm') {
+                const rightWrist = keypoints.find(kp => kp.name === 'right_wrist');
+                const rightElbow = keypoints.find(kp => kp.name === 'right_elbow');
+                if (rightWrist && rightWrist.score > 0.3) {
+                    return {
+                        x: (1 - rightWrist.x / video.videoWidth) * canvas.width,
+                        y: rightWrist.y / video.videoHeight * canvas.height
+                    };
+                } else if (rightElbow && rightElbow.score > 0.3) {
+                    return {
+                        x: (1 - rightElbow.x / video.videoWidth) * canvas.width,
+                        y: rightElbow.y / video.videoHeight * canvas.height
+                    };
+                }
+            } else if (partName === 'legs') {
+                const leftKnee = keypoints.find(kp => kp.name === 'left_knee');
+                const rightKnee = keypoints.find(kp => kp.name === 'right_knee');
+                const leftAnkle = keypoints.find(kp => kp.name === 'left_ankle');
+                const rightAnkle = keypoints.find(kp => kp.name === 'right_ankle');
+
+                const validPoints = [];
+                if (leftKnee && leftKnee.score > 0.3) validPoints.push(leftKnee);
+                if (rightKnee && rightKnee.score > 0.3) validPoints.push(rightKnee);
+                if (leftAnkle && leftAnkle.score > 0.3) validPoints.push(leftAnkle);
+                if (rightAnkle && rightAnkle.score > 0.3) validPoints.push(rightAnkle);
+
+                if (validPoints.length > 0) {
+                    const avgX = validPoints.reduce((sum, p) => sum + p.x, 0) / validPoints.length;
+                    const avgY = validPoints.reduce((sum, p) => sum + p.y, 0) / validPoints.length;
+                    return {
+                        x: (1 - avgX / video.videoWidth) * canvas.width,
+                        y: avgY / video.videoHeight * canvas.height
+                    };
+                }
+            }
+
+            return null;
+        }
+
+        // Detect shapes from pose
+        function detectShape(pose) {
+            const keypoints = pose.keypoints;
+
+            // T-pose detection
+            const leftShoulder = keypoints.find(kp => kp.name === 'left_shoulder');
+            const rightShoulder = keypoints.find(kp => kp.name === 'right_shoulder');
+            const leftWrist = keypoints.find(kp => kp.name === 'left_wrist');
+            const rightWrist = keypoints.find(kp => kp.name === 'right_wrist');
+
+            if (leftShoulder && rightShoulder && leftWrist && rightWrist) {
+                const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+                const armSpan = Math.abs(leftWrist.x - rightWrist.x);
+                const leftArmHeight = Math.abs(leftShoulder.y - leftWrist.y);
+                const rightArmHeight = Math.abs(rightShoulder.y - rightWrist.y);
+
+                // Check if arms are outstretched (T-pose)
+                if (armSpan > shoulderWidth * 2 && leftArmHeight < 100 && rightArmHeight < 100) {
+                    return 'T-Shape (Airplane)';
+                }
+            }
+
+            // Y-pose detection (arms up)
+            if (leftWrist && rightWrist && leftShoulder && rightShoulder) {
+                const leftArmUp = leftWrist.y < leftShoulder.y - 50;
+                const rightArmUp = rightWrist.y < rightShoulder.y - 50;
+
+                if (leftArmUp && rightArmUp) {
+                    return 'Y-Shape (Celebration)';
+                }
+            }
+
+            // One arm raised
+            if (leftWrist && leftShoulder && leftWrist.y < leftShoulder.y - 100) {
+                return 'Waving Left';
+            }
+            if (rightWrist && rightShoulder && rightWrist.y < rightShoulder.y - 100) {
+                return 'Waving Right';
+            }
+
+            return null;
+        }
+
+        // Draw illustration based on shape
+        function drawIllustration(shape, centerX, centerY) {
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+
+            if (shape.includes('T-Shape')) {
+                // Draw airplane
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 4;
+
+                // Body
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY - 50);
+                ctx.lineTo(centerX, centerY + 50);
+                ctx.stroke();
+
+                // Wings
+                ctx.beginPath();
+                ctx.moveTo(centerX - 80, centerY);
+                ctx.lineTo(centerX + 80, centerY);
+                ctx.stroke();
+
+                // Tail
+                ctx.beginPath();
+                ctx.moveTo(centerX - 30, centerY + 50);
+                ctx.lineTo(centerX + 30, centerY + 50);
+                ctx.stroke();
+
+            } else if (shape.includes('Y-Shape')) {
+                // Draw celebration bursts
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    const length = 60;
+                    ctx.strokeStyle = `hsl(${i * 45}, 100%, 60%)`;
+                    ctx.lineWidth = 6;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+                    ctx.stroke();
+                }
+            }
+
+            ctx.restore();
+        }
+
+        // Show shape detected message
+        function showShapeDetected(shape) {
+            shapeDetectedDiv.textContent = `Shape Detected: ${shape}`;
+            shapeDetectedDiv.style.opacity = 1;
+            setTimeout(() => {
+                shapeDetectedDiv.style.opacity = 0;
+            }, 2000);
+        }
+
+        // Check for color mixing
+        function checkColorMixing() {
+            const gridSize = 50;
+            const colorGrid = {};
+
+            shadowTrails.forEach(trail => {
+                const gridX = Math.floor(trail.x / gridSize);
+                const gridY = Math.floor(trail.y / gridSize);
+                const key = `${gridX},${gridY}`;
+
+                if (!colorGrid[key]) {
+                    colorGrid[key] = new Set();
+                }
+                colorGrid[key].add(trail.bodyPart);
+            });
+
+            let mixingCount = 0;
+            Object.values(colorGrid).forEach(parts => {
+                if (parts.size > 1) {
+                    mixingCount++;
+                }
+            });
+
+            colorsMixed = mixingCount;
+        }
+
+        // Update stats
+        function updateStats() {
+            document.getElementById('shadowCount').textContent = shadowTrails.length;
+            document.getElementById('colorsMixed').textContent = colorsMixed;
+        }
+
+        // Main animation loop
+        let lastShapeDetection = 0;
+
+        function animate() {
+            // Clear with slight fade for trail effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update and draw shadow trails
+            shadowTrails = shadowTrails.filter(trail => !trail.isDead());
+            shadowTrails.forEach(trail => {
+                trail.update();
+                trail.draw();
+            });
+
+            // Process poses
+            if (poses.length > 0) {
+                const pose = poses[0];
+
+                // Create shadows for each body part
+                Object.keys(bodyPartColors).forEach(partName => {
+                    const pos = getBodyPartPosition(pose, partName);
+                    if (pos) {
+                        shadowTrails.push(new ShadowTrail(pos.x, pos.y, bodyPartColors[partName], partName));
+                    }
+                });
+
+                // Detect shapes (throttled)
+                const now = Date.now();
+                if (now - lastShapeDetection > 2000) {
+                    const shape = detectShape(pose);
+                    if (shape) {
+                        showShapeDetected(shape);
+                        const torsoPos = getBodyPartPosition(pose, 'torso');
+                        if (torsoPos) {
+                            drawIllustration(shape, torsoPos.x, torsoPos.y);
+                        }
+                        lastShapeDetection = now;
+                    }
+                }
+            }
+
+            // Check color mixing
+            checkColorMixing();
+
+            // Update stats
+            updateStats();
+
+            // Detect pose for next frame
+            detectPose();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start button handler
+        startButton.addEventListener('click', async () => {
+            instructions.style.display = 'none';
+
+            try {
+                await setupCamera();
+                await loadModel();
+
+                gameStarted = true;
+
+                animate();
+
+            } catch (error) {
+                alert('Camera access is required for body tracking. Please allow camera access and refresh the page.');
+                console.error(error);
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>

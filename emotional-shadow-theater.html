@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotional Shadow Theater</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #video {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid white;
+            border-radius: 8px;
+            transform: scaleX(-1);
+            z-index: 100;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 650px;
+            z-index: 200;
+        }
+
+        #instructions h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        #instructions p {
+            margin-bottom: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        #startButton {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.3s;
+        }
+
+        #startButton:hover {
+            transform: scale(1.05);
+        }
+
+        #emotionDisplay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 32px;
+            background: rgba(0,0,0,0.8);
+            padding: 20px 30px;
+            border-radius: 15px;
+            z-index: 100;
+            text-align: center;
+        }
+
+        #emotionLabel {
+            font-size: 18px;
+            margin-top: 10px;
+            opacity: 0.8;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 100;
+        }
+
+        .control-button {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid white;
+            padding: 12px 25px;
+            font-size: 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .control-button:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .control-button.active {
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        #sceneElements {
+            position: absolute;
+            bottom: 80px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        #recordingIndicator {
+            position: absolute;
+            top: 20px;
+            right: 180px;
+            color: #FF4444;
+            font-size: 24px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.8);
+            padding: 15px 25px;
+            border-radius: 10px;
+            z-index: 100;
+            display: none;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        #promptDisplay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 36px;
+            text-align: center;
+            background: rgba(0,0,0,0.9);
+            padding: 30px 50px;
+            border-radius: 20px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+
+    <div id="instructions">
+        <h2>🎭 Emotional Shadow Theater</h2>
+        <p><strong>Create expressive shadow stories through movement and emotion!</strong></p>
+        <p>Your facial expressions change your shadow's color palette:</p>
+        <ul style="text-align: left; max-width: 500px; margin: 20px auto; list-style: none;">
+            <li style="margin: 10px 0;">😊 <strong>Happy/Excited:</strong> Warm oranges, reds, yellows</li>
+            <li style="margin: 10px 0;">😌 <strong>Calm/Peaceful:</strong> Cool blues, purples, teals</li>
+            <li style="margin: 10px 0;">😐 <strong>Neutral:</strong> Soft greens, earth tones</li>
+            <li style="margin: 10px 0;">😢 <strong>Sad:</strong> Deep blues, grays</li>
+        </ul>
+        <p><strong>Body movements</strong> create shadow characters that persist (outstretched arms = bird, crouched = mountain)</p>
+        <p>Interact with on-screen elements like trees, sun, and moon that also respond to your mood</p>
+        <p>Optional: Record 30-60 second emotional shadow stories</p>
+        <button id="startButton">Begin Creating</button>
+    </div>
+
+    <div id="emotionDisplay">
+        <div id="emotionEmoji">😊</div>
+        <div id="emotionLabel">Happy</div>
+    </div>
+
+    <div id="controls">
+        <button class="control-button" id="addTreeBtn">Add Tree 🌲</button>
+        <button class="control-button" id="addSunBtn">Add Sun ☀️</button>
+        <button class="control-button" id="addMoonBtn">Add Moon 🌙</button>
+        <button class="control-button" id="recordBtn">Record Story 🎥</button>
+        <button class="control-button" id="clearBtn">Clear Scene 🗑️</button>
+    </div>
+
+    <div id="sceneElements">
+        <div><strong>Scene Elements:</strong></div>
+        <div id="elementList">Empty scene</div>
+    </div>
+
+    <div id="recordingIndicator">● RECORDING</div>
+    <div id="promptDisplay"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/facemesh"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const instructions = document.getElementById('instructions');
+        const startButton = document.getElementById('startButton');
+        const emotionEmoji = document.getElementById('emotionEmoji');
+        const emotionLabel = document.getElementById('emotionLabel');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const promptDisplay = document.getElementById('promptDisplay');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let poseDetector;
+        let faceDetector;
+        let gameStarted = false;
+
+        // Emotion detection
+        let currentEmotion = 'neutral';
+        let emotionColors = {
+            happy: { r: 255, g: 150, b: 80 },
+            calm: { r: 100, g: 150, b: 255 },
+            neutral: { r: 150, g: 200, b: 150 },
+            sad: { r: 80, g: 100, b: 150 }
+        };
+
+        // Shadow characters
+        let shadowCharacters = [];
+        let shadowTrails = [];
+
+        // Scene elements
+        let sceneElements = [];
+
+        // Recording
+        let isRecording = false;
+        let recordingStartTime = 0;
+        let recordingDuration = 30;
+
+        // Weather/ambient
+        let weatherIntensity = 0;
+        let skyColor = { r: 20, g: 20, b: 40 };
+
+        class ShadowCharacter {
+            constructor(type, x, y, color, size) {
+                this.type = type; // 'bird', 'mountain', 'tree', 'wave'
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = size;
+                this.age = 0;
+                this.maxAge = 300;
+                this.alpha = 0.7;
+            }
+
+            update() {
+                this.age++;
+                this.alpha = 0.7 * (1 - this.age / this.maxAge);
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+                gradient.addColorStop(0, `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, 0.8)`);
+                gradient.addColorStop(1, `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+
+                if (this.type === 'bird') {
+                    // Draw bird wings
+                    ctx.beginPath();
+                    ctx.ellipse(this.x - this.size/2, this.y, this.size, this.size/3, -0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.ellipse(this.x + this.size/2, this.y, this.size, this.size/3, 0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (this.type === 'mountain') {
+                    // Draw mountain
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y - this.size);
+                    ctx.lineTo(this.x - this.size, this.y + this.size/2);
+                    ctx.lineTo(this.x + this.size, this.y + this.size/2);
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    // Default blob
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+
+            isDead() {
+                return this.age >= this.maxAge;
+            }
+        }
+
+        class SceneElement {
+            constructor(type, x, y) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.size = type === 'tree' ? 60 : 80;
+                this.pulse = 0;
+            }
+
+            update(emotion) {
+                this.pulse += 0.05;
+
+                // Elements respond to emotion
+                if (this.type === 'sun' && emotion === 'happy') {
+                    this.size = 80 + Math.sin(this.pulse) * 10;
+                } else if (this.type === 'moon' && emotion === 'calm') {
+                    this.size = 80 + Math.sin(this.pulse) * 8;
+                }
+            }
+
+            draw(emotionColor) {
+                ctx.save();
+
+                if (this.type === 'tree') {
+                    // Tree trunk
+                    ctx.fillStyle = `rgba(101, 67, 33, 0.8)`;
+                    ctx.fillRect(this.x - 10, this.y - 30, 20, 60);
+
+                    // Tree foliage (responds to emotion)
+                    const treeColor = this.blendWithEmotion({ r: 80, g: 140, b: 80 }, emotionColor, 0.3);
+                    ctx.fillStyle = `rgba(${treeColor.r}, ${treeColor.g}, ${treeColor.b}, 0.7)`;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y - 40, this.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                } else if (this.type === 'sun') {
+                    // Sun with rays
+                    const sunColor = this.blendWithEmotion({ r: 255, g: 220, b: 100 }, emotionColor, 0.4);
+
+                    // Rays
+                    for (let i = 0; i < 12; i++) {
+                        const angle = (i / 12) * Math.PI * 2 + this.pulse;
+                        const rayLength = this.size/2 + 20;
+                        ctx.strokeStyle = `rgba(${sunColor.r}, ${sunColor.g}, ${sunColor.b}, 0.5)`;
+                        ctx.lineWidth = 4;
+                        ctx.beginPath();
+                        ctx.moveTo(this.x, this.y);
+                        ctx.lineTo(
+                            this.x + Math.cos(angle) * rayLength,
+                            this.y + Math.sin(angle) * rayLength
+                        );
+                        ctx.stroke();
+                    }
+
+                    // Sun body
+                    const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size/2);
+                    gradient.addColorStop(0, `rgba(${sunColor.r}, ${sunColor.g}, ${sunColor.b}, 0.9)`);
+                    gradient.addColorStop(1, `rgba(${sunColor.r}, ${sunColor.g}, ${sunColor.b}, 0.3)`);
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                } else if (this.type === 'moon') {
+                    // Moon
+                    const moonColor = this.blendWithEmotion({ r: 220, g: 220, b: 255 }, emotionColor, 0.3);
+
+                    const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size/2);
+                    gradient.addColorStop(0, `rgba(${moonColor.r}, ${moonColor.g}, ${moonColor.b}, 0.9)`);
+                    gradient.addColorStop(1, `rgba(${moonColor.r}, ${moonColor.g}, ${moonColor.b}, 0.2)`);
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Craters
+                    ctx.fillStyle = `rgba(${moonColor.r - 30}, ${moonColor.g - 30}, ${moonColor.b - 30}, 0.3)`;
+                    ctx.beginPath();
+                    ctx.arc(this.x - 15, this.y - 10, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(this.x + 10, this.y + 5, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+
+            blendWithEmotion(baseColor, emotionColor, weight) {
+                return {
+                    r: Math.round(baseColor.r * (1 - weight) + emotionColor.r * weight),
+                    g: Math.round(baseColor.g * (1 - weight) + emotionColor.g * weight),
+                    b: Math.round(baseColor.b * (1 - weight) + emotionColor.b * weight)
+                };
+            }
+        }
+
+        // Setup camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        }
+
+        // Load models
+        async function loadModels() {
+            const poseModel = poseDetection.SupportedModels.MoveNet;
+            const poseConfig = {
+                modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            };
+            poseDetector = await poseDetection.createDetector(poseModel, poseConfig);
+
+            faceDetector = await facemesh.load({ maxFaces: 1 });
+        }
+
+        // Detect emotion from face
+        async function detectEmotion() {
+            if (!gameStarted) return;
+
+            const faces = await faceDetector.estimateFaces(video);
+
+            if (faces.length > 0) {
+                const face = faces[0];
+
+                // Simple emotion detection based on mouth and eye positions
+                const mouth = face.scaledMesh[13]; // Mouth
+                const leftEye = face.scaledMesh[33];
+                const rightEye = face.scaledMesh[263];
+                const nose = face.scaledMesh[1];
+
+                const eyeLevel = (leftEye[1] + rightEye[1]) / 2;
+                const mouthSmile = mouth[1] < nose[1] + 20; // Mouth higher = smile
+                const eyesRelaxed = Math.abs(leftEye[1] - rightEye[1]) < 10;
+
+                // Determine emotion
+                if (mouthSmile && eyesRelaxed) {
+                    currentEmotion = 'happy';
+                    emotionEmoji.textContent = '😊';
+                    emotionLabel.textContent = 'Happy';
+                } else if (eyesRelaxed && !mouthSmile) {
+                    currentEmotion = 'calm';
+                    emotionEmoji.textContent = '😌';
+                    emotionLabel.textContent = 'Calm';
+                } else if (mouth[1] > nose[1] + 30) {
+                    currentEmotion = 'sad';
+                    emotionEmoji.textContent = '😢';
+                    emotionLabel.textContent = 'Sad';
+                } else {
+                    currentEmotion = 'neutral';
+                    emotionEmoji.textContent = '😐';
+                    emotionLabel.textContent = 'Neutral';
+                }
+            }
+        }
+
+        // Detect pose and create shadow characters
+        async function detectPose() {
+            if (!gameStarted) return;
+
+            const poses = await poseDetector.estimatePoses(video);
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+                const keypoints = pose.keypoints;
+
+                const leftShoulder = keypoints.find(kp => kp.name === 'left_shoulder');
+                const rightShoulder = keypoints.find(kp => kp.name === 'right_shoulder');
+                const leftWrist = keypoints.find(kp => kp.name === 'left_wrist');
+                const rightWrist = keypoints.find(kp => kp.name === 'right_wrist');
+                const leftHip = keypoints.find(kp => kp.name === 'left_hip');
+                const nose = keypoints.find(kp => kp.name === 'nose');
+
+                // Create shadow trails for body
+                if (nose && nose.score > 0.3) {
+                    const x = (1 - nose.x / video.videoWidth) * canvas.width;
+                    const y = nose.y / video.videoHeight * canvas.height;
+                    const color = emotionColors[currentEmotion];
+
+                    shadowTrails.push({
+                        x, y, color,
+                        alpha: 0.3,
+                        radius: 40,
+                        age: 0,
+                        maxAge: 20
+                    });
+                }
+
+                // Detect bird pose (arms outstretched)
+                if (leftWrist && rightWrist && leftShoulder && rightShoulder) {
+                    const armSpan = Math.abs(leftWrist.x - rightWrist.x);
+                    const shoulderSpan = Math.abs(leftShoulder.x - rightShoulder.x);
+
+                    if (armSpan > shoulderSpan * 2 && Math.random() < 0.05) {
+                        const centerX = (1 - (leftWrist.x + rightWrist.x) / 2 / video.videoWidth) * canvas.width;
+                        const centerY = (leftWrist.y + rightWrist.y) / 2 / video.videoHeight * canvas.height;
+                        shadowCharacters.push(new ShadowCharacter('bird', centerX, centerY, emotionColors[currentEmotion], 60));
+                    }
+                }
+
+                // Detect mountain pose (crouched)
+                if (leftHip && leftShoulder && leftHip.score > 0.3 && leftShoulder.score > 0.3) {
+                    const torsoHeight = Math.abs(leftShoulder.y - leftHip.y);
+
+                    if (torsoHeight < 100 && Math.random() < 0.03) {
+                        const x = (1 - leftHip.x / video.videoWidth) * canvas.width;
+                        const y = leftHip.y / video.videoHeight * canvas.height;
+                        shadowCharacters.push(new ShadowCharacter('mountain', x, y, emotionColors[currentEmotion], 80));
+                    }
+                }
+            }
+        }
+
+        // Update sky color based on emotion
+        function updateSkyColor() {
+            const targetColor = currentEmotion === 'happy' ? { r: 40, g: 50, b: 80 } :
+                              currentEmotion === 'calm' ? { r: 20, g: 30, b: 60 } :
+                              currentEmotion === 'sad' ? { r: 30, g: 30, b: 40 } :
+                              { r: 30, g: 40, b: 50 };
+
+            skyColor.r += (targetColor.r - skyColor.r) * 0.02;
+            skyColor.g += (targetColor.g - skyColor.g) * 0.02;
+            skyColor.b += (targetColor.b - skyColor.b) * 0.02;
+        }
+
+        // Draw weather effects
+        function drawWeather() {
+            if (currentEmotion === 'sad') {
+                weatherIntensity = Math.min(1, weatherIntensity + 0.01);
+            } else {
+                weatherIntensity = Math.max(0, weatherIntensity - 0.01);
+            }
+
+            if (weatherIntensity > 0) {
+                // Rain
+                ctx.strokeStyle = `rgba(150, 150, 200, ${weatherIntensity * 0.3})`;
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 50; i++) {
+                    const x = (Date.now() * 0.5 + i * 50) % canvas.width;
+                    const y = (Date.now() * 2 + i * 30) % canvas.height;
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x - 5, y + 15);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Show prompt
+        function showPrompt(text) {
+            promptDisplay.textContent = text;
+            promptDisplay.style.opacity = 1;
+            setTimeout(() => {
+                promptDisplay.style.opacity = 0;
+            }, 3000);
+        }
+
+        // Update element list
+        function updateElementList() {
+            const elementList = document.getElementById('elementList');
+            if (sceneElements.length === 0) {
+                elementList.textContent = 'Empty scene';
+            } else {
+                const counts = {};
+                sceneElements.forEach(el => {
+                    counts[el.type] = (counts[el.type] || 0) + 1;
+                });
+                elementList.innerHTML = Object.entries(counts)
+                    .map(([type, count]) => `${count}x ${type}`)
+                    .join(', ');
+            }
+        }
+
+        // Main animation loop
+        function animate() {
+            // Draw sky
+            updateSkyColor();
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, `rgb(${skyColor.r}, ${skyColor.g}, ${skyColor.b})`);
+            gradient.addColorStop(1, `rgb(${skyColor.r + 20}, ${skyColor.g + 20}, ${skyColor.b + 20})`);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw weather
+            drawWeather();
+
+            // Update and draw scene elements
+            sceneElements.forEach(element => {
+                element.update(currentEmotion);
+                element.draw(emotionColors[currentEmotion]);
+            });
+
+            // Update and draw shadow trails
+            shadowTrails = shadowTrails.filter(trail => trail.age < trail.maxAge);
+            shadowTrails.forEach(trail => {
+                trail.age++;
+                trail.alpha = 0.3 * (1 - trail.age / trail.maxAge);
+
+                const gradient = ctx.createRadialGradient(trail.x, trail.y, 0, trail.x, trail.y, trail.radius);
+                gradient.addColorStop(0, `rgba(${trail.color.r}, ${trail.color.g}, ${trail.color.b}, ${trail.alpha})`);
+                gradient.addColorStop(1, `rgba(${trail.color.r}, ${trail.color.g}, ${trail.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(trail.x - trail.radius, trail.y - trail.radius, trail.radius * 2, trail.radius * 2);
+            });
+
+            // Update and draw shadow characters
+            shadowCharacters = shadowCharacters.filter(char => !char.isDead());
+            shadowCharacters.forEach(char => {
+                char.update();
+                char.draw();
+            });
+
+            // Check recording time
+            if (isRecording) {
+                const elapsed = (Date.now() - recordingStartTime) / 1000;
+                if (elapsed >= recordingDuration) {
+                    stopRecording();
+                }
+            }
+
+            detectEmotion();
+            detectPose();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Button handlers
+        document.getElementById('addTreeBtn').addEventListener('click', () => {
+            const x = Math.random() * canvas.width;
+            const y = canvas.height - 100 - Math.random() * 200;
+            sceneElements.push(new SceneElement('tree', x, y));
+            updateElementList();
+        });
+
+        document.getElementById('addSunBtn').addEventListener('click', () => {
+            const x = canvas.width * 0.2 + Math.random() * canvas.width * 0.2;
+            const y = canvas.height * 0.2 + Math.random() * 100;
+            sceneElements.push(new SceneElement('sun', x, y));
+            updateElementList();
+        });
+
+        document.getElementById('addMoonBtn').addEventListener('click', () => {
+            const x = canvas.width * 0.6 + Math.random() * canvas.width * 0.2;
+            const y = canvas.height * 0.2 + Math.random() * 100;
+            sceneElements.push(new SceneElement('moon', x, y));
+            updateElementList();
+        });
+
+        document.getElementById('recordBtn').addEventListener('click', () => {
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            sceneElements = [];
+            shadowCharacters = [];
+            updateElementList();
+        });
+
+        function startRecording() {
+            isRecording = true;
+            recordingStartTime = Date.now();
+            recordingIndicator.style.display = 'block';
+            document.getElementById('recordBtn').textContent = 'Stop Recording ⏹️';
+
+            const prompts = [
+                '"Show me anger"',
+                '"Express joy"',
+                '"Demonstrate transition from sad to hopeful"'
+            ];
+            showPrompt(prompts[Math.floor(Math.random() * prompts.length)]);
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            recordingIndicator.style.display = 'none';
+            document.getElementById('recordBtn').textContent = 'Record Story 🎥';
+            showPrompt('Story complete!');
+        }
+
+        // Start button handler
+        startButton.addEventListener('click', async () => {
+            instructions.style.display = 'none';
+
+            try {
+                await setupCamera();
+                await loadModels();
+
+                gameStarted = true;
+                showPrompt('Express yourself through shadow and movement');
+
+                animate();
+
+            } catch (error) {
+                alert('Camera access is required. Please allow camera access and refresh the page.');
+                console.error(error);
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
